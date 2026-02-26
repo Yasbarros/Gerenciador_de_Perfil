@@ -1,81 +1,104 @@
-```bash
 #!/bin/bash
 
-# ===============================
-# Script: cadastrar_perfil.sh
-# Descrição: Cadastra perfis de ambiente de desenvolvimento, incluindo tarefas, comandos, URLs e apps.
-# ===============================
+# --- Verificação de Argumentos (HELP via Dialog) ---
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    # Verifica se o dialog está instalado antes de tentar abrir
+    if command -v dialog &> /dev/null; then
+        dialog --title "Help - Gerenciador de Perfil" --msgbox \
+"Script de Cadastro\n\n\
+Descrição:\n\
+Este script permite criar perfis de ambiente de desenvolvimento.\n\
+As configurações são salvas em: ~/.dev_profiles.json 20 75 \n\n\
+Primeira etapa: rode o ambiente de cadastro ./cadastrar_perfil.sh e siga as instruções para criar um perfil.\n\n\
+Segunda etapa: para iniciar o ambiente, use ./iniciar_ambiente.sh e selecione o perfil criado. \n\n\
+Terceira etapa: é necessário criar um arquivo .desktop no diretório apropriado do seu sistema operacional para carregar o ambiente automaticamente. Mais instruções podem ser encontradas na documentação (README)." 20 75
+    else
+        echo "Gerenciador de Perfil - Script de Cadastro"
+        echo "Uso: ./cadastrar_perfil.sh --help"
+        echo "Nota: Instale o 'dialog' para ver esta ajuda em modo gráfico."
+    fi
+    exit 0
+fi
 
-# --- Verificação de dependências ---
+# --- Verificação de Dependências ---
 if ! command -v dialog &> /dev/null || ! command -v jq &> /dev/null; then
     echo "ERRO: 'dialog' e 'jq' são necessários."
     echo "Instale-os com: sudo apt-get install dialog jq"
     exit 1
 fi
 
-# --- Inicialização do arquivo de configuração ---
 CONFIG_FILE="$HOME/.dev_profiles.json"
 [ -f "$CONFIG_FILE" ] || echo '{"perfis":[]}' > "$CONFIG_FILE"
 
-# --- Cadastro do nome do perfil ---
-nome_perfil=$(dialog --stdout --inputbox "Digite um nome para o novo perfil (ex: Projeto_Backend):" 8 60)
-[ -z "$nome_perfil" ] && exit 0
+# --- Início do Cadastro do Perfil ---
+NOME_PERFIL=$(dialog --stdout --inputbox "Digite um nome para o novo perfil (ex: Projeto_Backend):" 8 60)
+[ -z "$NOME_PERFIL" ] && exit 0
 
-# --- Loop para cadastro de tarefas ---
-tarefas_json="[]"
+# --- Loop para Adicionar Tarefas ---
+TAREFAS_JSON="[]"
 while true; do
-    dialog --yesno "Você deseja adicionar uma nova tarefa de inicialização para o perfil '$nome_perfil'?\n\n(Ex: abrir um projeto, rodar um comando, etc.)" 10 70
+    dialog --yesno "Você deseja adicionar uma nova tarefa de inicialização para o perfil '$NOME_PERFIL'?\n\n(Ex: abrir um projeto, rodar um comando, etc.)" 10 70
     if [ $? -ne 0 ]; then
         break
     fi
 
-    # --- Cadastro dos detalhes da tarefa ---
-    diretorio=$(dialog --stdout --title "Tarefa: Diretório" --inputbox "Qual o diretório de trabalho para esta tarefa?\n(Deixe em branco se não for necessário)" 8 70)
+    # 1. Obter o diretório da tarefa
+    DIRETORIO=$(dialog --stdout --title "Tarefa: Diretório" --inputbox "Qual o diretório de trabalho para esta tarefa?\n(Deixe em branco se não for necessário)" 8 70)
 
-    comando=$(dialog --stdout --title "Tarefa: Comando" --inputbox "Qual comando deve ser executado neste diretório?\n(Deixe em branco para apenas abrir o terminal)" 8 70)
+    # 2. ESCOLHA DO APLICATIVO/EDITOR
+    APP_ESCOLHIDO=$(dialog --stdout --title "Escolha o Aplicativo" --menu "Como deseja abrir este diretório?" 15 60 5 \
+        "terminal" "Apenas abrir o terminal" \
+        "code" "Abrir com VS Code" \
+        "cursor" "Abrir com Cursor" \
+        "subl" "Abrir com Sublime Text" \
+        "outro" "Outro comando customizado")
 
-    url_resultante=""
-    if [ ! -z "$comando" ]; then
-        url_resultante=$(dialog --stdout --title "Tarefa: URL Resultante" --inputbox "Se o comando acima gera um link (ex: localhost), digite-o aqui para abrir no navegador:" 8 70)
+    # Se escolheu "outro", pergunta qual o comando
+    if [ "$APP_ESCOLHIDO" == "outro" ]; then
+        APP_COMANDO=$(dialog --stdout --title "Comando Customizado" --inputbox "Digite o comando para abrir o editor (ex: pycharm, atom):" 8 70)
+    else
+        APP_COMANDO=$APP_ESCOLHIDO
     fi
 
-    # --- Pergunta se deve abrir o diretório em algum app ---
-    abrir_app=""
-    dialog --yesno "Você deseja abrir o diretório informado em algum aplicativo? (ex: VSCode, Nautilus, etc.)" 8 60
-    if [ $? -eq 0 ]; then
-        abrir_app=$(dialog --stdout --inputbox "Digite o comando para abrir o diretório (ex: code . ou nautilus .):" 8 60)
+    # 3. Obter o comando de execução (ex: npm run dev)
+    COMANDO=$(dialog --stdout --title "Tarefa: Comando de Execução" --inputbox "Qual comando deve ser executado no terminal?\n(Ex: npm run dev, docker-compose up)\nDeixe em branco se não houver comando." 10 70)
+
+    # 4. Obter a URL resultante (opcional)
+    URL_RESULTANTE=""
+    if [ ! -z "$COMANDO" ]; then
+        URL_RESULTANTE=$(dialog --stdout --title "Tarefa: URL Resultante" --inputbox "Se o comando acima gera um link (ex: localhost), digite-o aqui para abrir no navegador:" 8 70)
     fi
 
-    # --- Monta o objeto da tarefa e adiciona ao array ---
-    tarefa_atual=$(jq -n \
-        --arg dir "$diretorio" \
-        --arg cmd "$comando" \
-        --arg url "$url_resultante" \
-        --arg app "$abrir_app" \
-        '{diretorio: $dir, comando: $cmd, url_resultante: $url, abrir_app: $app}')
+    # Monta o objeto JSON para a tarefa atual
+    TAREFA_ATUAL=$(jq -n \
+        --arg dir "$DIRETORIO" \
+        --arg app "$APP_COMANDO" \
+        --arg cmd "$COMANDO" \
+        --arg url "$URL_RESULTANTE" \
+        '{diretorio: $dir, app: $app, comando: $cmd, url_resultante: $url}')
 
-    tarefas_json=$(echo "$tarefas_json" | jq ". += [$tarefa_atual]")
+    # Adiciona a tarefa à lista de tarefas
+    TAREFAS_JSON=$(echo "$TAREFAS_JSON" | jq ". += [$TAREFA_ATUAL]")
 done
 
-# --- Cadastro das URLs gerais do perfil ---
-urls_gerais=$(dialog --stdout --title "URLs Gerais" --inputbox "Agora, digite os endereços web gerais para este perfil (Jira, GitHub, etc.), separados por espaço:" 10 80)
+# --- Cadastro das URLs Gerais ---
+URLS_GERAIS=$(dialog --stdout --title "URLs Gerais" --inputbox "Agora, digite os endereços web gerais para este perfil (Jira, GitHub, etc.), separados por espaço:" 10 80)
 
-# --- Montagem do objeto do perfil e salvamento ---
-novo_perfil=$(jq -n \
-    --arg nome "$nome_perfil" \
-    --argjson tarefas "$tarefas_json" \
-    --arg urls "$urls_gerais" \
+# --- Montagem e Salvamento do Perfil ---
+NOVO_PERFIL=$(jq -n \
+    --arg nome "$NOME_PERFIL" \
+    --argjson tarefas "$TAREFAS_JSON" \
+    --arg urls "$URLS_GERAIS" \
     '{
         nome: $nome,
         tarefas: $tarefas,
         urls_gerais: ($urls | split(" "))
     }')
 
-# --- Atualiza o arquivo de configuração, substituindo perfil se já existir ---
-jq --argjson novo "$novo_perfil" '
+# Adiciona ou atualiza o perfil no arquivo de configuração
+jq --argjson novo "$NOVO_PERFIL" '
     .perfis = [.perfis[] | select(.nome != $novo.nome)] + [$novo]
 ' "$CONFIG_FILE" > tmp.$$.json && mv tmp.$$.json "$CONFIG_FILE"
 
-dialog --msgbox "Perfil '$nome_perfil' cadastrado com sucesso!" 6 60
+dialog --msgbox "Perfil '$NOME_PERFIL' cadastrado com sucesso!" 6 60
 clear
-```

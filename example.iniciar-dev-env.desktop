@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Iniciar Ambiente de Desenvolvimento
+Comment=Inicia os perfis de trabalho automaticamente
+Exec=/caminho/para/seu/Gerenciador_de_Perfil/iniciar_ambiente.sh
+Terminal=false
