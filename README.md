@@ -25,7 +25,7 @@ Você pode ver as opções de uso e ajuda rodando:
 ./iniciar_ambiente.sh --help
 ```
 
-### 3. Inicialização Automática com o Sistema
+### 2. Inicialização Automática com o Sistema
 
 Para que o ambiente seja iniciado automaticamente ao ligar o computador, é necessário criar um arquivo `.desktop` na pasta de autostart do seu sistema.
 
