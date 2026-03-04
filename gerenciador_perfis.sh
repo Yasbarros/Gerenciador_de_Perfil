@@ -1,64 +1,88 @@
 #!/bin/bash
 
-# --- Variáveis Globais ---
+# =============================================================================
+# Gerenciador de Perfil - Script Unificado
+# Descrição: Permite criar e iniciar perfis de ambiente de desenvolvimento.
+# =============================================================================
+
 CONFIG_FILE="$HOME/.dev_profiles.json"
-NAVEGADOR="firefox" # Pode ser configurado pelo usuário
+NAVEGADOR="firefox"
 
-# --- Função para verificar e instalar dependências universalmente ---
-install_package() {
-    local package_name=$1
-    if ! command -v "$package_name" &> /dev/null; then
-        echo "Verificando e instalando a dependência: $package_name..."
-        if command -v apt-get &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: apt-get"
-            sudo apt-get update -y
-            sudo apt-get install -y "$package_name"
-        elif command -v dnf &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: dnf"
-            sudo dnf install -y "$package_name"
-        elif command -v yum &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: yum"
-            sudo yum install -y "$package_name"
-        elif command -v pacman &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: pacman"
-            sudo pacman -Sy --noconfirm "$package_name"
-        elif command -v zypper &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: zypper"
-            sudo zypper install -y "$package_name"
-        elif command -v apk &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: apk"
-            sudo apk add "$package_name"
-        elif command -v brew &> /dev/null; then
-            echo "Detectado gerenciador de pacotes: brew (macOS)"
-            brew install "$package_name"
-        else
-            echo "ERRO: Nenhum gerenciador de pacotes compatível encontrado para instalar $package_name. Por favor, instale manualmente." >&2
-            exit 1
-        fi
-
-        if [ $? -eq 0 ]; then
-            echo "$package_name instalado com sucesso."
-        else
-            echo "ERRO: Falha ao instalar $package_name. Por favor, instale manualmente." >&2
-            exit 1
-        fi
+# --- Verificação de Argumentos (HELP via Dialog) ---
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    if command -v dialog &> /dev/null; then
+        dialog --title "Help - Gerenciador de Perfil" --msgbox \
+"Script Unificado do Gerenciador de Perfil\n\n\
+Descrição:\n\
+Este script permite criar e iniciar perfis de ambiente de desenvolvimento.\n\
+As configurações são salvas em: ~/.dev_profiles.json\n\n\
+Uso:\n\
+  ./gerenciadorPerfil.sh          Abre o menu principal\n\
+  ./gerenciadorPerfil.sh --help   Exibe esta ajuda\n\n\
+No menu principal você pode:\n\
+  1. Cadastrar um novo perfil\n\
+  2. Iniciar um perfil existente\n\
+  3. Sair" 20 75
     else
-        echo "$package_name já está instalado."
+        echo "Gerenciador de Perfil - Script Unificado"
+        echo "Uso: ./gerenciadorPerfil.sh [--help]"
+        echo "Nota: Instale o 'dialog' para ver esta ajuda em modo gráfico."
     fi
-}
+    exit 0
+fi
 
-# --- Verificação e Instalação de Dependências Essenciais ---
-install_package "dialog"
-install_package "jq"
+# --- Verificação e Instalação de Dependências ---
+DEPS_FALTANDO=()
+command -v dialog &> /dev/null || DEPS_FALTANDO+=("dialog")
+command -v jq &> /dev/null || DEPS_FALTANDO+=("jq")
 
-# --- Inicializa o arquivo de configuração se não existir ---
+if [ ${#DEPS_FALTANDO[@]} -gt 0 ]; then
+    echo "Dependências não encontradas: ${DEPS_FALTANDO[*]}"
+    echo "Tentando instalar automaticamente..."
+
+    # Detecta o gerenciador de pacotes disponível
+    if command -v apt-get &> /dev/null; then
+        PKG_MANAGER="sudo apt-get install -y"
+    elif command -v dnf &> /dev/null; then
+        PKG_MANAGER="sudo dnf install -y"
+    elif command -v yum &> /dev/null; then
+        PKG_MANAGER="sudo yum install -y"
+    elif command -v pacman &> /dev/null; then
+        PKG_MANAGER="sudo pacman -S --noconfirm"
+    elif command -v zypper &> /dev/null; then
+        PKG_MANAGER="sudo zypper install -y"
+    else
+        echo "ERRO: Não foi possível detectar o gerenciador de pacotes."
+        echo "Instale manualmente: ${DEPS_FALTANDO[*]}"
+        exit 1
+    fi
+
+    echo "Usando: $PKG_MANAGER ${DEPS_FALTANDO[*]}"
+    $PKG_MANAGER "${DEPS_FALTANDO[@]}"
+
+    # Verifica se a instalação foi bem-sucedida
+    for DEP in "${DEPS_FALTANDO[@]}"; do
+        if ! command -v "$DEP" &> /dev/null; then
+            echo "ERRO: Falha ao instalar '$DEP'. Instale manualmente e tente novamente."
+            exit 1
+        fi
+    done
+
+    echo "Dependências instaladas com sucesso!"
+    sleep 1
+fi
+
 [ -f "$CONFIG_FILE" ] || echo '{"perfis":[]}' > "$CONFIG_FILE"
 
-# --- Função para Cadastrar um Novo Perfil ---
+# =============================================================================
+# FUNÇÃO: Cadastrar Perfil
+# =============================================================================
 cadastrar_perfil() {
+    # --- Início do Cadastro do Perfil ---
     NOME_PERFIL=$(dialog --stdout --inputbox "Digite um nome para o novo perfil (ex: Projeto_Backend):" 8 60)
-    [ -z "$NOME_PERFIL" ] && return 1 # Retorna se o nome estiver vazio
+    [ -z "$NOME_PERFIL" ] && return
 
+    # --- Loop para Adicionar Tarefas ---
     TAREFAS_JSON="[]"
     while true; do
         dialog --yesno "Você deseja adicionar uma nova tarefa de inicialização para o perfil '$NOME_PERFIL'?\n\n(Ex: abrir um projeto, rodar um comando, etc.)" 10 70
@@ -66,8 +90,10 @@ cadastrar_perfil() {
             break
         fi
 
+        # 1. Obter o diretório da tarefa
         DIRETORIO=$(dialog --stdout --title "Tarefa: Diretório" --inputbox "Qual o diretório de trabalho para esta tarefa?\n(Deixe em branco se não for necessário)" 8 70)
 
+        # 2. ESCOLHA DO APLICATIVO/EDITOR
         APP_ESCOLHIDO=$(dialog --stdout --title "Escolha o Aplicativo" --menu "Como deseja abrir este diretório?" 15 60 5 \
             "terminal" "Apenas abrir o terminal" \
             "code" "Abrir com VS Code" \
@@ -75,19 +101,23 @@ cadastrar_perfil() {
             "subl" "Abrir com Sublime Text" \
             "outro" "Outro comando customizado")
 
+        # Se escolheu "outro", pergunta qual o comando
         if [ "$APP_ESCOLHIDO" == "outro" ]; then
             APP_COMANDO=$(dialog --stdout --title "Comando Customizado" --inputbox "Digite o comando para abrir o editor (ex: pycharm, atom):" 8 70)
         else
             APP_COMANDO=$APP_ESCOLHIDO
         fi
 
+        # 3. Obter o comando de execução (ex: npm run dev)
         COMANDO=$(dialog --stdout --title "Tarefa: Comando de Execução" --inputbox "Qual comando deve ser executado no terminal?\n(Ex: npm run dev, docker-compose up)\nDeixe em branco se não houver comando." 10 70)
 
+        # 4. Obter a URL resultante (opcional)
         URL_RESULTANTE=""
         if [ ! -z "$COMANDO" ]; then
             URL_RESULTANTE=$(dialog --stdout --title "Tarefa: URL Resultante" --inputbox "Se o comando acima gera um link (ex: localhost), digite-o aqui para abrir no navegador:" 8 70)
         fi
 
+        # Monta o objeto JSON para a tarefa atual
         TAREFA_ATUAL=$(jq -n \
             --arg dir "$DIRETORIO" \
             --arg app "$APP_COMANDO" \
@@ -95,11 +125,14 @@ cadastrar_perfil() {
             --arg url "$URL_RESULTANTE" \
             '{diretorio: $dir, app: $app, comando: $cmd, url_resultante: $url}')
 
+        # Adiciona a tarefa à lista de tarefas
         TAREFAS_JSON=$(echo "$TAREFAS_JSON" | jq ". += [$TAREFA_ATUAL]")
     done
 
+    # --- Cadastro das URLs Gerais ---
     URLS_GERAIS=$(dialog --stdout --title "URLs Gerais" --inputbox "Agora, digite os endereços web gerais para este perfil (Jira, GitHub, etc.), separados por espaço:" 10 80)
 
+    # --- Montagem e Salvamento do Perfil ---
     NOVO_PERFIL=$(jq -n \
         --arg nome "$NOME_PERFIL" \
         --argjson tarefas "$TAREFAS_JSON" \
@@ -110,39 +143,49 @@ cadastrar_perfil() {
             urls_gerais: ($urls | split(" "))
         }')
 
-    jq --argjson novo "$NOVO_PERFIL" \
-        '.perfis = [.perfis[] | select(.nome != $novo.nome)] + [$novo]' "$CONFIG_FILE" > tmp.$$.json && mv tmp.$$.json "$CONFIG_FILE"
+    # Adiciona ou atualiza o perfil no arquivo de configuração
+    jq --argjson novo "$NOVO_PERFIL" '
+        .perfis = [.perfis[] | select(.nome != $novo.nome)] + [$novo]
+    ' "$CONFIG_FILE" > tmp.$$.json && mv tmp.$$.json "$CONFIG_FILE"
 
     dialog --msgbox "Perfil '$NOME_PERFIL' cadastrado com sucesso!" 6 60
-    clear
 }
 
-# --- Função para Iniciar um Perfil Existente ---
-iniciar_perfil() {
+# =============================================================================
+# FUNÇÃO: Iniciar Ambiente
+# =============================================================================
+iniciar_ambiente() {
+    # --- Verificação e Seleção de Perfil ---
+    if [ ! -f "$CONFIG_FILE" ]; then
+        dialog --msgbox "Configuração não encontrada. Cadastre um perfil primeiro." 6 60
+        return
+    fi
+
     mapfile -t NOMES_PERFIS < <(jq -r '.perfis[].nome' "$CONFIG_FILE")
     NUM_PERFIS=${#NOMES_PERFIS[@]}
 
     if [ "$NUM_PERFIS" -eq 0 ]; then
-        dialog --msgbox "Nenhum perfil cadastrado. Por favor, cadastre um perfil primeiro." 6 60
-        return 1
+        dialog --msgbox "Nenhum perfil cadastrado. Cadastre um perfil primeiro." 6 60
+        return
     fi
 
-    local PERFIL_SELECIONADO
     if [ "$NUM_PERFIS" -eq 1 ]; then
         PERFIL_SELECIONADO="${NOMES_PERFIS[0]}"
     else
         MENU_OPTS=()
         for I in "${!NOMES_PERFIS[@]}"; do MENU_OPTS+=("$((I+1))" "${NOMES_PERFIS[$I]}"); done
         ESCOLHA=$(dialog --stdout --menu "Escolha o perfil para iniciar:" 15 60 0 "${MENU_OPTS[@]}")
-        [ -z "$ESCOLHA" ] && return 1 # Retorna se a escolha estiver vazia
+        [ -z "$ESCOLHA" ] && return
         PERFIL_SELECIONADO="${NOMES_PERFIS[$((ESCOLHA-1))]}"
     fi
 
-    dialog --msgbox "Iniciando ambiente para o perfil: $PERFIL_SELECIONADO" 6 60
+    clear
+    echo "Iniciando ambiente para o perfil: $PERFIL_SELECIONADO"
     PERFIL_JSON=$(jq ".perfis[] | select(.nome==\"$PERFIL_SELECIONADO\")" "$CONFIG_FILE")
 
     TODAS_URLS=()
 
+    # --- Execução das Tarefas ---
     NUM_TAREFAS=$(echo "$PERFIL_JSON" | jq '.tarefas | length')
     for (( I=0; I<NUM_TAREFAS; I++ )); do
         DIRETORIO=$(echo "$PERFIL_JSON" | jq -r ".tarefas[$I].diretorio")
@@ -153,7 +196,7 @@ iniciar_perfil() {
         WORK_DIR="${DIRETORIO:-$HOME}"
 
         # 1. ABRIR O EDITOR/APP SELECIONADO
-        if [ "$APP" != "terminal" ] && [ ! -z "$APP" ] && [ "$APP" != "null" ]; then
+        if [ "$APP" != "terminal" ] && [ ! -z "$APP" ]; then
             echo "Abrindo $APP em $WORK_DIR..."
             (cd "$WORK_DIR" && $APP . ) &
         fi
@@ -163,7 +206,6 @@ iniciar_perfil() {
             COMANDO_FINAL="cd \"$WORK_DIR\" && echo 'Executando: $COMANDO' && $COMANDO; exec bash"
             gnome-terminal -- bash -c "$COMANDO_FINAL" &
         else
-            # Se não houver comando, apenas abre o terminal na pasta se o app for "terminal"
             if [ "$APP" == "terminal" ]; then
                 gnome-terminal --working-directory="$WORK_DIR" &
             fi
@@ -173,6 +215,7 @@ iniciar_perfil() {
         if [ ! -z "$URL_RESULTANTE" ] && [ "$URL_RESULTANTE" != "null" ]; then
             TODAS_URLS+=("$URL_RESULTANTE")
         fi
+
         sleep 1
     done
 
@@ -184,38 +227,28 @@ iniciar_perfil() {
 
     # --- Abrir Navegador ---
     if [ ${#TODAS_URLS[@]} -gt 0 ]; then
-        dialog --msgbox "Aguardando 5 segundos para os servidores iniciarem e abrindo ${#TODAS_URLS[@]} URLs no $NAVEGADOR..." 8 70
+        echo "Aguardando 5 segundos para os servidores iniciarem..."
         sleep 5
+        echo "Abrindo ${#TODAS_URLS[@]} URLs no $NAVEGADOR..."
         $NAVEGADOR "${TODAS_URLS[@]}" &
     fi
 
-    dialog --msgbox "Ambiente '$PERFIL_SELECIONADO' iniciado!" 6 60
-    clear
+    echo "Ambiente '$PERFIL_SELECIONADO' iniciado!"
 }
 
-# --- Loop Principal do Menu ---
+# =============================================================================
+# MENU PRINCIPAL
+# =============================================================================
 while true; do
-    CHOICE=$(dialog --stdout --title "Gerenciador de Perfis de Desenvolvimento" --menu "Escolha uma opção:" 15 60 3 \
-        "1" "Iniciar Perfil Existente" \
-        "2" "Cadastrar Novo Perfil" \
-        "3" "Sair")
+    OPCAO=$(dialog --stdout --title "Gerenciador de Perfil" --menu \
+        "Selecione uma opção:" 12 50 3 \
+        1 "Cadastrar novo perfil" \
+        2 "Iniciar ambiente" \
+        3 "Sair")
 
-    case $CHOICE in
-        1)
-            iniciar_perfil
-            ;;
-        2)
-            cadastrar_perfil
-            ;;
-        3)
-            clear
-            echo "Saindo do Gerenciador de Perfis."
-            exit 0
-            ;;
-        *)
-            clear
-            echo "Nenhuma opção selecionada. Saindo."
-            exit 0
-            ;;
+    case $OPCAO in
+        1) cadastrar_perfil ;;
+        2) iniciar_ambiente ;;
+        3|"") clear; exit 0 ;;
     esac
 done
